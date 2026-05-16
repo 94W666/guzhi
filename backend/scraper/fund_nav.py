@@ -23,6 +23,33 @@ from config import FUND_DETAIL_URL
 # API fetching
 # ---------------------------------------------------------------------------
 
+def fetch_fund_name(fund_code: str) -> Optional[str]:
+    """Fetch fund name from pingzhongdata JS file (lightweight, no NAV parsing).
+
+    Returns the fund short name (fS_name), or None if not found.
+    """
+    from config import FUND_DETAIL_URL
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": f"https://fund.eastmoney.com/{fund_code}.html",
+    }
+    url = FUND_DETAIL_URL.format(fund_code=fund_code)
+    try:
+        with httpx.Client(timeout=15, headers=headers) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+        m = re.search(r"var fS_name\s*=\s*\"(.+?)\"", resp.text)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_nav_history(fund_code: str) -> Optional[dict]:
     """Fetch complete NAV history for a fund.
 
@@ -177,16 +204,26 @@ def save_nav_to_db(fund_id: int, nav_data: dict) -> int:
 # One-stop helper for API layer
 # ---------------------------------------------------------------------------
 
-def ensure_nav_data(fund_code: str) -> int:
-    """Ensure NAV data exists in DB for a given fund code.
+def _last_trading_day() -> date:
+    """Return the most recent trading day (skip weekends)."""
+    today = date.today()
+    if today.weekday() == 5:      # Saturday → Friday
+        return today - timedelta(days=1)
+    if today.weekday() == 6:      # Sunday → Friday
+        return today - timedelta(days=2)
+    return today
 
-    Checks if the fund exists and if NAV data is already present.
-    Fetches and saves fresh data if needed.
+
+def ensure_nav_data(fund_code: str) -> int:
+    """Ensure NAV data exists in DB and is up to date.
+
+    Fetches fresh data if NAV is missing or stale (behind the last trading day).
 
     Returns the number of NAV records available.
     """
     from database import SessionLocal
     from models import Fund, FundNav
+    from sqlalchemy import func
 
     db = SessionLocal()
     try:
@@ -194,12 +231,13 @@ def ensure_nav_data(fund_code: str) -> int:
         if not fund:
             return 0
 
-        # Check if we already have data
-        count = db.query(FundNav).filter(FundNav.fund_id == fund.id).count()
-        if count > 0:
-            return count
+        # Check if data is fresh (latest NAV date >= last trading day)
+        max_date = db.query(func.max(FundNav.nav_date)).filter(
+            FundNav.fund_id == fund.id
+        ).scalar()
+        if max_date is not None and max_date >= _last_trading_day():
+            return db.query(FundNav).filter(FundNav.fund_id == fund.id).count()
 
-        # Need to fetch
         fund_id = fund.id
     finally:
         db.close()

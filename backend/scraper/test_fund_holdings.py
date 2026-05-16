@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scraper.fund_holdings import (
     fetch_holdings,
     save_holdings_to_db,
-    batch_fetch_all_us_qdii,
+    batch_fetch_all,
 )
 
 
@@ -119,15 +119,15 @@ def test_upsert():
 
 
 def test_batch_fetch():
-    """Batch fetch holdings for every QDII fund in the database."""
+    """Batch fetch holdings for every fund in the database."""
     print("\n" + "=" * 60)
     print("Fund Holdings Scraper — Batch Fetch")
     print("=" * 60)
 
-    results = batch_fetch_all_us_qdii()
+    results = batch_fetch_all()
 
     print(f"\nSummary:")
-    print(f"  Total QDII funds:  {results['total']}")
+    print(f"  Total funds:  {results['total']}")
     print(f"  Success:           {results['success']}")
     print(f"  Failed:            {results['failed']}")
     print(f"  No holdings:       {results['no_holdings']}")
@@ -155,7 +155,7 @@ def main():
     test_upsert()
 
     print("\n" + "=" * 60)
-    resp = input("\nProceed with batch fetch for ALL US QDII funds? (y/n): ")
+    resp = input("\nProceed with batch fetch for ALL funds? (y/n): ")
     if resp.lower().strip() == "y":
         test_batch_fetch()
     else:

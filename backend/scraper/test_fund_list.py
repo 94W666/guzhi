@@ -9,7 +9,7 @@ import os
 # Ensure the backend directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scraper.fund_list import fetch_qdii_fund_list, filter_us_qdii, save_to_db
+from scraper.fund_list import fetch_fund_list, filter_us_qdii, save_to_db
 
 
 def main():
@@ -19,7 +19,7 @@ def main():
 
     # 1. Fetch all QDII funds
     print("\n[1] Fetching QDII fund list from Eastmoney...")
-    all_funds = fetch_qdii_fund_list()
+    all_funds = fetch_fund_list()
 
     if not all_funds:
         print("ERROR: No funds fetched. Check network connection or API availability.")

@@ -266,8 +266,8 @@ def save_holdings_to_db(fund_id: int, holdings: list[dict], report_date: date) -
 # Batch processing
 # ---------------------------------------------------------------------------
 
-def batch_fetch_all_us_qdii() -> dict:
-    """Iterate over every QDII fund in the database and fetch its holdings.
+def batch_fetch_all() -> dict:
+    """Iterate over every fund in the database and fetch its holdings.
 
     Returns a summary dict::
 
@@ -284,7 +284,7 @@ def batch_fetch_all_us_qdii() -> dict:
 
     db = SessionLocal()
     try:
-        funds = db.query(Fund).filter(Fund.fund_type == "QDII").all()
+        funds = db.query(Fund).all()
     finally:
         db.close()
 

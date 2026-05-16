@@ -1,4 +1,4 @@
-"""Scrape QDII fund list from Eastmoney public API.
+"""Scrape fund list from Eastmoney public API.
 
 Data source: https://fund.eastmoney.com/data/rankhandler.aspx
 The API returns a JSONP-like response containing fund rankings with codes, names, NAVs, etc.
@@ -37,8 +37,11 @@ def _parse_jsonp(text: str) -> Optional[dict]:
         return None
 
 
-def fetch_qdii_fund_list() -> list[dict]:
-    """Fetch the list of QDII funds from Eastmoney.
+def fetch_fund_list(fund_type: str = "qdii") -> list[dict]:
+    """Fetch fund list from Eastmoney by type.
+
+    Args:
+        fund_type: Fund type filter — 'qdii', 'all', 'gp' (股票), 'hh' (混合), 'zq' (债券), etc.
 
     Returns a list of dicts with keys: code, name, fund_type, nav, cumulative_nav,
     daily_change, day_1, week_1, month_1, month_3, month_6, year_1, year_2, year_3,
@@ -47,7 +50,7 @@ def fetch_qdii_fund_list() -> list[dict]:
     params = {
         "op": "ph",
         "dt": "kf",
-        "ft": "qdii",
+        "ft": fund_type,
         "rs": "",
         "gs": "0",
         "sc": "zzf",
@@ -95,7 +98,7 @@ def fetch_qdii_fund_list() -> list[dict]:
             fund_info = {
                 "code": parts[0].strip(),
                 "name": parts[1].strip(),
-                "fund_type": "QDII",
+                "fund_type": "OTHER" if fund_type == "all" else fund_type.upper(),
                 "nav": float(parts[4]) if parts[4] else 0.0,
                 "cumulative_nav": float(parts[5]) if parts[5] else 0.0,
                 "daily_change": float(parts[6]) if parts[6] else 0.0,
@@ -178,7 +181,7 @@ def save_to_db(funds: list[dict]):
                 fund = Fund(
                     code=f["code"],
                     name=f["name"],
-                    fund_type=f.get("fund_type", "QDII"),
+                    fund_type=f.get("fund_type", "OTHER"),
                     tracking_index=f.get("tracking_index", ""),
                     scale=f.get("scale", 0.0),
                 )

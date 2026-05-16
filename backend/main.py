@@ -22,6 +22,7 @@ from calculator.metrics import (
     sortino_ratio,
     calmar_ratio,
     win_rate,
+    _period_cutoff_date,
 )
 from scraper.fund_nav import ensure_nav_data
 from scraper.fund_holdings import fetch_holdings, save_holdings_to_db
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="QDII Fund Analyzer",
+    title="Fund Analyzer",
     description="Multi-dimensional fund analysis: max drawdown, Sharpe ratio, P/E, volatility, and more",
     version="0.2.0",
     lifespan=lifespan,
@@ -74,7 +75,7 @@ def serve_dashboard():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "QDII Fund Analyzer"}
+    return {"status": "ok", "service": "Fund Analyzer"}
 
 
 # ---------------------------------------------------------------------------
@@ -100,64 +101,72 @@ def list_funds(db: Session = Depends(get_db)):
 
 @app.get("/api/funds/search")
 def search_fund(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
-    """Search for a fund by code or name.
+    """Search for funds by code or name.
 
-    If the fund doesn't exist in DB, attempt to fetch it from Eastmoney.
+    Returns a list of matching funds from DB and Eastmoney.
+    Auto-saves only exact code matches.
     """
-    # Search in DB — partial code match + name contains
-    fund = db.query(Fund).filter(
-        (Fund.code == q) | Fund.code.contains(q) | Fund.name.contains(q)
-    ).first()
+    results = []
 
-    if fund:
-        return {
-            "id": fund.id,
-            "code": fund.code,
-            "name": fund.name,
-            "fund_type": fund.fund_type,
+    # 1. Search in DB
+    db_funds = db.query(Fund).filter(
+        Fund.code.contains(q) | Fund.name.contains(q)
+    ).all()
+    seen_codes = set()
+    for f in db_funds:
+        seen_codes.add(f.code)
+        results.append({
+            "code": f.code,
+            "name": f.name,
+            "fund_type": f.fund_type,
             "source": "database",
-        }
+        })
 
-    # Try to auto-discover: fetch fund info from Eastmoney
-    from scraper.fund_list import fetch_qdii_fund_list, save_to_db as save_fund_list
-    from scraper.fund_list import filter_us_qdii
+    # 2. Search Eastmoney (search all fund types directly)
+    from scraper.fund_list import fetch_fund_list, save_to_db as save_fund_list
 
-    all_funds = fetch_qdii_fund_list()
-    if not all_funds:
-        raise HTTPException(status_code=502, detail="Cannot reach Eastmoney API")
+    def _find_all_in_list(funds, query):
+        """Find all funds matching by code or name."""
+        matches = []
+        for f in funds:
+            code = f.get("code", "")
+            name = f.get("name", "")
+            if query.lower() in code.lower() or query.lower() in name.lower():
+                matches.append(f)
+        return matches
 
-    # Find by code
-    matched = None
-    for f in all_funds:
-        if f.get("code") == q:
-            matched = f
-            break
+    all_funds = fetch_fund_list("all")
+    if all_funds:
+        matches = _find_all_in_list(all_funds, q)
+        for m in matches:
+            if m["code"] not in seen_codes:
+                seen_codes.add(m["code"])
+                results.append({
+                    "code": m["code"],
+                    "name": m["name"],
+                    "fund_type": m.get("fund_type", "OTHER"),
+                    "source": "eastmoney",
+                })
 
-    if not matched:
-        # Try name search
-        for f in all_funds:
-            if q.lower() in f.get("name", "").lower():
-                matched = f
-                break
+        # Auto-save exact code match (regardless of how many name-matches)
+        exact = next((m for m in matches if m["code"] == q), None)
+        if exact:
+            save_fund_list([exact])
+        elif q.isdigit() and len(q) == 6:
+            # Fallback: try pingzhongdata for exact 6-digit code lookup
+            # (ranking API only covers top 10000 funds)
+            from scraper.fund_nav import fetch_fund_name
+            name = fetch_fund_name(q)
+            if name:
+                fund_info = {"code": q, "name": name, "fund_type": "OTHER"}
+                save_fund_list([fund_info])
+                if q not in seen_codes:
+                    results.append({
+                        "code": q, "name": name,
+                        "fund_type": "OTHER", "source": "eastmoney",
+                    })
 
-    if not matched:
-        raise HTTPException(status_code=404, detail=f"Fund '{q}' not found")
-
-    # Save to DB
-    save_fund_list([matched])
-
-    # Re-query
-    fund = db.query(Fund).filter(Fund.code == matched["code"]).first()
-    if not fund:
-        raise HTTPException(status_code=500, detail="Failed to save fund")
-
-    return {
-        "id": fund.id,
-        "code": fund.code,
-        "name": fund.name,
-        "fund_type": fund.fund_type,
-        "source": "eastmoney",
-    }
+    return {"query": q, "count": len(results), "results": results}
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +175,34 @@ def search_fund(q: str = Query(..., min_length=1), db: Session = Depends(get_db)
 
 @app.get("/api/funds/{code}")
 def fund_detail(code: str, db: Session = Depends(get_db)):
-    """Get fund detail with all metrics and holdings summary."""
+    """Get fund detail with all metrics and holdings summary.
+
+    Auto-discovers funds from Eastmoney if not yet in the database.
+    """
     fund = db.query(Fund).filter(Fund.code == code).first()
+    if not fund:
+        # Auto-discover from Eastmoney
+        from scraper.fund_list import fetch_fund_list, save_to_db as save_fund_list
+
+        matched = None
+        all_funds = fetch_fund_list("all")
+        if all_funds:
+            for f in all_funds:
+                if f.get("code") == code:
+                    matched = f
+                    break
+
+        if not matched:
+            # Fallback: pingzhongdata (covers funds outside ranking top 10000)
+            from scraper.fund_nav import fetch_fund_name
+            name = fetch_fund_name(code)
+            if name:
+                matched = {"code": code, "name": name, "fund_type": "OTHER"}
+
+        if matched:
+            save_fund_list([matched])
+            fund = db.query(Fund).filter(Fund.code == code).first()
+
     if not fund:
         raise HTTPException(status_code=404, detail=f"Fund '{code}' not found")
 
@@ -255,14 +290,12 @@ def fund_nav_history(
 
     ensure_nav_data(code)
 
-    from calculator.metrics import _slice_by_period
+    cutoff = _period_cutoff_date(period)
 
-    nav_records = (
-        db.query(FundNav)
-        .filter(FundNav.fund_id == fund.id)
-        .order_by(FundNav.nav_date.asc())
-        .all()
-    )
+    query = db.query(FundNav).filter(FundNav.fund_id == fund.id)
+    if cutoff:
+        query = query.filter(FundNav.nav_date >= cutoff)
+    nav_records = query.order_by(FundNav.nav_date.asc()).all()
 
     nav_list = [
         {
@@ -274,8 +307,7 @@ def fund_nav_history(
         for n in nav_records
     ]
 
-    sliced = _slice_by_period(nav_list, period)
-    return {"fund_code": code, "period": period, "count": len(sliced), "data": sliced}
+    return {"fund_code": code, "period": period, "count": len(nav_list), "data": nav_list}
 
 
 # ---------------------------------------------------------------------------
@@ -295,12 +327,12 @@ def fund_metrics(
 
     ensure_nav_data(code)
 
-    nav_records = (
-        db.query(FundNav)
-        .filter(FundNav.fund_id == fund.id)
-        .order_by(FundNav.nav_date.asc())
-        .all()
-    )
+    cutoff = _period_cutoff_date(period)
+
+    query = db.query(FundNav).filter(FundNav.fund_id == fund.id)
+    if cutoff:
+        query = query.filter(FundNav.nav_date >= cutoff)
+    nav_records = query.order_by(FundNav.nav_date.asc()).all()
 
     nav_list = [
         {
@@ -317,7 +349,7 @@ def fund_metrics(
 
     metrics = compute_all_metrics(nav_list)
 
-    # Add PE data
+    # Add PE data (cached, parallel)
     pe_data = fund_pe_ratio(code)
     metrics["pe_ratio"] = pe_data
 

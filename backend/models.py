@@ -1,9 +1,9 @@
-"""SQLAlchemy ORM models for QDII fund tracking."""
+"""SQLAlchemy ORM models for fund tracking."""
 
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Date, ForeignKey, Text, create_engine
+    Column, Integer, String, Float, DateTime, Date, ForeignKey, Text, create_engine, Index
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -16,7 +16,7 @@ class Fund(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(10), unique=True, nullable=False, index=True)
     name = Column(String(100), nullable=False)
-    fund_type = Column(String(50), default="QDII")
+    fund_type = Column(String(50), default="OTHER")
     tracking_index = Column(String(100), default="")
     scale = Column(Float, default=0.0)  # fund scale in 亿元
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -78,6 +78,10 @@ class FundNav(Base):
     daily_return = Column(Float, default=0.0)  # (nav_t / nav_{t-1}) - 1
 
     fund = relationship("Fund", back_populates="nav_history")
+
+    __table_args__ = (
+        Index("ix_fund_nav_fund_date", "fund_id", "nav_date"),
+    )
 
     def __repr__(self):
         return f"<FundNav(fund_id={self.fund_id}, date={self.nav_date}, unit={self.unit_nav})>"

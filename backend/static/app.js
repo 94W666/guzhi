@@ -110,6 +110,24 @@ const METRIC_INFO = {
             <p class="note">胜率只统计天数，不考虑涨幅大小。一只基金可能"跌三天涨一天"但一天涨幅覆盖三天跌幅（低胜率高盈亏比），或反之。需结合收益和回撤综合评判。</p>
         `,
     },
+    nav_chart: {
+        title: "净值走势 — 单位净值 vs 累计净值",
+        body: `
+            <p><strong>蓝色实线 — 单位净值：</strong>每份基金份额的当日价格。它是投资者日常买卖基金的<em>实际成交价格</em>，不考虑历史分红的影响。</p>
+            <p><strong>绿色虚线 — 累计净值：</strong>单位净值 + 历史上所有分红的复权还原。它反映了<em>包含分红再投资</em>后的真实增长轨迹。</p>
+            <p><strong>为什么看累计净值？</strong>假设一只基金从 1 元涨到 2 元后每份分红 1 元，单位净值回到 1 元——看起来好像没涨。但累计净值是 2 元，真实回报是翻倍。因此<em>计算年化收益、最大回撤等指标均使用累计净值</em>。</p>
+            <p class="note">两条线差距越大，说明基金历史分红越多。</p>
+        `,
+    },
+    drawdown_chart: {
+        title: "回撤曲线 (Drawdown)",
+        body: `
+            <p><strong>含义：</strong>从净值历史最高点算起，当前净值距离那个峰值的跌幅。红色面积图展示的是"如果我在最高点买入，现在亏了多少"。</p>
+            <p><strong>为什么重要？</strong>最大回撤是衡量基金<em>极端风险</em>的核心指标。两只基金可能有相同的年化收益，但回撤 10% 的持有体验远好于回撤 30% 的。</p>
+            <p><strong>怎么看：</strong>回撤曲线越贴近零轴越好。大幅下探的深谷意味着基金曾经历严重下跌，投资者若在谷底割肉则永久锁定亏损。</p>
+            <p class="note">图表使用累计净值计算回撤。点击"最大回撤"指标卡片可查看具体评级标准。</p>
+        `,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +146,7 @@ const state = {
     navChart: null,
     ddChart: null,
     navHistory: [],
+    navHistoryAll: [],  // full NAV history cached once, filtered client-side
     dca: null,
     dcaChart: null,
     _loadingFund: false,
@@ -144,9 +163,9 @@ const API = {
     },
     async search(q) {
         const resp = await fetch(`/api/funds/search?q=${encodeURIComponent(q)}`);
-        if (resp.status === 404) return null;
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        return resp.json();
+        const data = await resp.json();
+        return data.results || [];
     },
 };
 
@@ -186,6 +205,7 @@ async function loadFund(code) {
     state._loadingFund = true;
     state.loading = true;
     state.navHistory = [];
+    state.navHistoryAll = [];
     state.dca = null;
     _lastChartPeriod = null;
     render();
@@ -200,7 +220,9 @@ async function loadFund(code) {
         state.searchQuery = code;
         state.searchResults = [];
         document.title = `${data.fund.name} - 基金分析`;
-        // Load DCA in background (slower, don't block first render)
+        // Load full NAV history once (cached for client-side period filtering)
+        // and DCA in background (both slower, don't block first render)
+        prefetchNavAll(code);
         loadDca(code);
     } catch (err) {
         console.error(err);
@@ -277,10 +299,39 @@ function buildDrawdownChart(navData) {
 
 let _lastChartPeriod = null;
 
+async function prefetchNavAll(code) {
+    try {
+        const resp = await API.get(`/api/funds/${code}/nav-history?period=all`);
+        state.navHistoryAll = resp.data || [];
+    } catch (err) {
+        state.navHistoryAll = [];
+    }
+}
+
+function filterNavByPeriod(allNav, period) {
+    if (period === 'all' || !allNav.length) return allNav;
+    const d = new Date();
+    let cutoff;
+    if (period === '1y') { d.setFullYear(d.getFullYear() - 1); cutoff = d.toISOString().slice(0, 10); }
+    else if (period === '3y') { d.setFullYear(d.getFullYear() - 3); cutoff = d.toISOString().slice(0, 10); }
+    else if (period === '5y') { d.setFullYear(d.getFullYear() - 5); cutoff = d.toISOString().slice(0, 10); }
+    else if (period === 'ytd') { cutoff = `${d.getFullYear()}-01-01`; }
+    if (!cutoff) return allNav;
+    return allNav.filter(item => item.nav_date >= cutoff);
+}
+
 async function loadCharts(force = false) {
     if (!state.fund) return;
     const period = state.activePeriod === "all" ? "all" : state.activePeriod;
-    // Use cached data if period hasn't changed (unless forced)
+    // Filter from cached full NAV history
+    if (state.navHistoryAll.length > 0) {
+        state.navHistory = filterNavByPeriod(state.navHistoryAll, period);
+        _lastChartPeriod = period;
+        buildNavChart(state.navHistory);
+        buildDrawdownChart(state.navHistory);
+        return;
+    }
+    // Fallback: fetch from API if prefetch hasn't completed
     if (!force && _lastChartPeriod === period && state.navHistory.length > 0) {
         buildNavChart(state.navHistory);
         buildDrawdownChart(state.navHistory);
@@ -320,17 +371,17 @@ async function refresh() {
         btn.classList.toggle('active', btn.dataset.period === state.activePeriod);
     });
 
+    // Update chart from cached NAV data (instant, no network)
+    state.navHistory = filterNavByPeriod(state.navHistoryAll, period);
+    _lastChartPeriod = period;
+    buildNavChart(state.navHistory);
+    buildDrawdownChart(state.navHistory);
+
+    // Fetch fresh metrics from backend (only this, not nav-history)
     try {
         const metricsPeriod = state.activePeriod === 'all' ? 'all' : state.activePeriod;
-        const [navResp, metricsResp] = await Promise.all([
-            API.get(`/api/funds/${state.fund.code}/nav-history?period=${period}`),
-            API.get(`/api/funds/${state.fund.code}/metrics?period=${metricsPeriod}`),
-        ]);
-        state.navHistory = navResp.data;
+        const metricsResp = await API.get(`/api/funds/${state.fund.code}/metrics?period=${metricsPeriod}`);
         state.metrics = metricsResp.metrics;
-        _lastChartPeriod = period;
-        buildNavChart(state.navHistory);
-        buildDrawdownChart(state.navHistory);
         // Update metric cards inline — no full re-render needed
         updateMetricCards();
     } catch (err) {
@@ -347,13 +398,8 @@ async function onSearchInput() {
     if (state.searchTimer) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(async () => {
         try {
-            const result = await API.search(q);
-            if (result) {
-                state.searchResults = [result];
-            } else {
-                const all = await API.get('/api/funds');
-                state.searchResults = all.filter(f => f.code.includes(q) || f.name.toLowerCase().includes(q.toLowerCase()));
-            }
+            const results = await API.search(q);
+            state.searchResults = results || [];
         } catch { state.searchResults = []; }
         updateSearchDropdown();
     }, 300);
@@ -618,8 +664,8 @@ function render() {
             </div>
         </div>
         <div class="charts-row">
-            <div class="chart-card"><h3>净值走势</h3><canvas id="navChart"></canvas></div>
-            <div class="chart-card"><h3>回撤曲线</h3><canvas id="drawdownChart"></canvas></div>
+            <div class="chart-card"><h3 data-metric="nav_chart" class="clickable">净值走势 <span class="info-icon">?</span></h3><canvas id="navChart"></canvas></div>
+            <div class="chart-card"><h3 data-metric="drawdown_chart" class="clickable">回撤曲线 <span class="info-icon">?</span></h3><canvas id="drawdownChart"></canvas></div>
         </div>
         ${state.dca ? `<div class="section"><h3>定投回测 (月投\u00a5${state.dca.monthly_amount}, 近${state.dca.years}年)</h3>
             ${renderDcaInterpretation(state.dca)}
@@ -705,6 +751,10 @@ function rebindEvents() {
     document.querySelectorAll(".card.clickable").forEach(card => {
         card.addEventListener("click", () => openMetricInfo(card.dataset.metric));
     });
+    // Chart title clicks → open metric info
+    document.querySelectorAll("h3[data-metric].clickable").forEach(el => {
+        el.addEventListener("click", () => openMetricInfo(el.dataset.metric));
+    });
     // Header title → back to landing
     const h1 = document.querySelector('.header h1');
     if (h1) {
@@ -715,10 +765,24 @@ function rebindEvents() {
             state.holdings = [];
             state.peHistory = null;
             state.navHistory = [];
+            state.navHistoryAll = [];
             state.dcaResult = null;
+            state.searchQuery = "";
+            state.searchResults = [];
+            // Clear search input visually
+            const si = document.getElementById('searchInput');
+            if (si) si.value = '';
             render();
         });
     }
+    // Click outside search → close dropdown
+    document.addEventListener('click', (e) => {
+        const dd = document.getElementById('searchDropdown');
+        const si = document.getElementById('searchInput');
+        if (dd && si && !si.contains(e.target) && !dd.contains(e.target)) {
+            dd.style.display = 'none';
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

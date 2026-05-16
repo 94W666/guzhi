@@ -6,6 +6,8 @@ sorted by date ascending.
 """
 
 import math
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Optional
 
@@ -38,6 +40,19 @@ def _slice_by_period(nav_list: list[dict], period: str) -> list[dict]:
         return d
 
     return [n for n in nav_list if _to_date(n["nav_date"]) >= cutoff]
+
+
+def _period_cutoff_date(period: str) -> Optional[date]:
+    """Return the cutoff date for a NAV query period, or None for 'all'."""
+    if period == "all":
+        return None
+    today = date.today()
+    if period == "ytd":
+        return date(today.year, 1, 1)
+    delta_map = {"1y": 365, "3y": 1095, "5y": 1825}
+    if period in delta_map:
+        return today - timedelta(days=delta_map[period])
+    return None
 
 
 def _get_rf_rate() -> float:
@@ -273,11 +288,97 @@ def compute_all_metrics(nav_list: list[dict]) -> dict:
 # PE Ratio (fund-level)
 # ---------------------------------------------------------------------------
 
+# In-memory PE cache: {fund_code: (timestamp, result_dict)}
+_pe_cache: dict[str, tuple[float, dict]] = {}
+_PE_CACHE_TTL = 300  # 5 minutes
+
+
+def fund_pe_ratio(fund_code: str) -> dict:
+    """Compute fund-level P/E ratio as a weighted harmonic mean.
+
+    Fetches current holdings from DB, then gets P/E (TTM) for each stock
+    via the Eastmoney push2 API. Results are cached for 5 minutes.
+
+    Returns::
+
+        {
+            "pe": float | None,
+            "stock_pes": {stock_code: pe},
+            "missing": [stock_codes without PE data],
+        }
+    """
+    # Check cache
+    now = time.time()
+    if fund_code in _pe_cache:
+        ts, cached = _pe_cache[fund_code]
+        if now - ts < _PE_CACHE_TTL:
+            return cached
+
+    from database import SessionLocal
+    from models import Fund, Holding
+
+    db = SessionLocal()
+    try:
+        fund = db.query(Fund).filter(Fund.code == fund_code).first()
+        if not fund:
+            result = {"pe": None, "stock_pes": {}, "missing": []}
+            _pe_cache[fund_code] = (now, result)
+            return result
+
+        holdings = db.query(Holding).filter(Holding.fund_id == fund.id).all()
+    finally:
+        db.close()
+
+    if not holdings:
+        result = {"pe": None, "stock_pes": {}, "missing": []}
+        _pe_cache[fund_code] = (now, result)
+        return result
+
+    # Build stock list
+    stocks = list({h.stock_code for h in holdings})
+    weights = {h.stock_code: h.weight for h in holdings}
+
+    # Fetch P/E data from Eastmoney (parallel, best-effort)
+    try:
+        stock_pes = _fetch_stock_pes(stocks)
+    except Exception:
+        stock_pes = {}
+
+    # Compute weighted harmonic mean
+    total_weight = sum(weights.values())
+    if total_weight == 0:
+        result = {"pe": None, "stock_pes": stock_pes, "missing": []}
+        _pe_cache[fund_code] = (now, result)
+        return result
+
+    harmonic_sum = 0.0
+    weight_used = 0.0
+    missing = []
+
+    for stock_code, weight in weights.items():
+        pe = stock_pes.get(stock_code)
+        if pe and pe > 0:
+            norm_weight = weight / total_weight
+            harmonic_sum += norm_weight / pe
+            weight_used += norm_weight
+        else:
+            missing.append(stock_code)
+
+    if harmonic_sum == 0 or weight_used < 0.5:
+        result = {"pe": None, "stock_pes": stock_pes, "missing": missing}
+        _pe_cache[fund_code] = (now, result)
+        return result
+
+    fund_pe = round(1.0 / harmonic_sum, 2)
+    result = {"pe": fund_pe, "stock_pes": stock_pes, "missing": missing}
+    _pe_cache[fund_code] = (now, result)
+    return result
+
+
 # ---------------------------------------------------------------------------
-# PE-based Valuation Assessment
+# PE-based Valuation Assessment (deprecated)
 # ---------------------------------------------------------------------------
 
-# deprecated — 合规版本不使用估值裁决功能，只展示数据不给结论
 def valuation_assessment(fund_name: str, fund_type: str, pe: Optional[float],
                          tracking_index: str = "") -> dict:
     """[deprecated] Assess fund valuation based on portfolio PE ratio.
@@ -331,11 +432,9 @@ def valuation_assessment(fund_name: str, fund_type: str, pe: Optional[float],
 
     # Add context based on fund type
     is_index = any(kw in (fund_name or "") for kw in ["指数", "ETF", "标普", "500", "沪深", "中证"])
-    is_qdii = "QDII" in (fund_type or "")
-    is_index_qdii = is_index and is_qdii
+    is_overseas = "QDII" in (fund_type or "")
 
-    if is_index_qdii:
-        # QDII index: compare to typical US/global index PE ranges
+    if is_index and is_overseas:
         explanation += " 作为QDII指数基金，持仓PE直接反映海外市场的估值水平。"
         if "标普" in (fund_name or ""):
             explanation += "标普500长期PE中枢约在15-18，当前水平可与该区间对比判断贵贱。"
@@ -456,77 +555,11 @@ def dca_backtest(nav_list: list[dict], monthly_amount: float = 1000.0, years: in
     }
 
 
-def fund_pe_ratio(fund_code: str) -> dict:
-    """Compute fund-level P/E ratio as a weighted harmonic mean.
-
-    Fetches current holdings from DB, then gets P/E (TTM) for each stock
-    via the Eastmoney push2 API.
-
-    Returns::
-
-        {
-            "pe": float | None,
-            "stock_pes": {stock_code: pe},
-            "missing": [stock_codes without PE data],
-        }
-    """
-    from database import SessionLocal
-    from models import Fund, Holding
-
-    db = SessionLocal()
-    try:
-        fund = db.query(Fund).filter(Fund.code == fund_code).first()
-        if not fund:
-            return {"pe": None, "stock_pes": {}, "missing": []}
-
-        holdings = db.query(Holding).filter(Holding.fund_id == fund.id).all()
-    finally:
-        db.close()
-
-    if not holdings:
-        return {"pe": None, "stock_pes": {}, "missing": []}
-
-    # Build stock list
-    stocks = list({h.stock_code for h in holdings})
-    weights = {h.stock_code: h.weight for h in holdings}
-
-    # Fetch P/E data from Eastmoney (best-effort; API may be unavailable)
-    try:
-        stock_pes = _fetch_stock_pes(stocks)
-    except Exception:
-        stock_pes = {}
-
-    # Compute weighted harmonic mean
-    # PE_fund = 1 / sum(weight_i / PE_i), but weights are percentages
-    # Normalize weights to sum to 1 first
-    total_weight = sum(weights.values())
-    if total_weight == 0:
-        return {"pe": None, "stock_pes": stock_pes, "missing": []}
-
-    harmonic_sum = 0.0
-    weight_used = 0.0
-    missing = []
-
-    for stock_code, weight in weights.items():
-        pe = stock_pes.get(stock_code)
-        if pe and pe > 0:
-            norm_weight = weight / total_weight
-            harmonic_sum += norm_weight / pe
-            weight_used += norm_weight
-        else:
-            missing.append(stock_code)
-
-    if harmonic_sum == 0 or weight_used < 0.5:  # need at least 50% weight coverage
-        return {"pe": None, "stock_pes": stock_pes, "missing": missing}
-
-    fund_pe = round(1.0 / harmonic_sum, 2)
-    return {"pe": fund_pe, "stock_pes": stock_pes, "missing": missing}
-
-
 def _fetch_stock_pes(stocks: list[str]) -> dict[str, Optional[float]]:
-    """Fetch P/E TTM for each stock via Eastmoney push2 single-stock API.
+    """Fetch P/E TTM for each stock via Eastmoney push2 API — parallel.
 
-    Uses ``push2.eastmoney.com/api/qt/stock/get`` per stock (most reliable).
+    Uses ThreadPoolExecutor to fetch all stocks concurrently, reducing
+    total time from sum(all) to max(single).
 
     Returns ``{stock_code: pe_value|None}``.
     """
@@ -536,7 +569,6 @@ def _fetch_stock_pes(stocks: list[str]) -> dict[str, Optional[float]]:
         return {}
 
     def _market_prefix(code: str) -> str:
-        """Determine Eastmoney market prefix by stock code pattern."""
         c = code.strip()
         if c[0].isalpha():
             return "106"  # NASDAQ default for US tickers
@@ -546,10 +578,7 @@ def _fetch_stock_pes(stocks: list[str]) -> dict[str, Optional[float]]:
             return "0"  # Shenzhen
         return "106"
 
-    result: dict[str, Optional[float]] = {}
-
     SINGLE_URL = "https://push2.eastmoney.com/api/qt/stock/get"
-
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -559,39 +588,47 @@ def _fetch_stock_pes(stocks: list[str]) -> dict[str, Optional[float]]:
         "Referer": "https://quote.eastmoney.com/",
     }
 
-    # Deduplicate stocks
-    seen = set()
+    # Deduplicate
+    unique = list(dict.fromkeys(stocks))  # preserves order, removes dups
 
-    with httpx.Client(timeout=10, headers=headers) as client:
-        for s in stocks:
-            if s in seen:
-                continue
-            seen.add(s)
-
-            market = _market_prefix(s)
-            params = {
-                "secid": f"{market}.{s}",
-                "fields": "f57,f115",
-                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-            }
-            try:
+    def _fetch_one(s: str) -> tuple[str, Optional[float]]:
+        market = _market_prefix(s)
+        params = {
+            "secid": f"{market}.{s}",
+            "fields": "f57,f115",
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+        }
+        try:
+            with httpx.Client(timeout=10, headers=headers) as client:
                 resp = client.get(SINGLE_URL, params=params)
                 resp.raise_for_status()
-                data = resp.json()
+                item = resp.json().get("data")
+        except Exception:
+            return (s, None)
+
+        if not item or not isinstance(item, dict):
+            return (s, None)
+
+        pe_val = item.get("f115")
+        if pe_val is not None and pe_val != "-" and pe_val != "":
+            try:
+                pe = float(pe_val)
+                if pe > 0:
+                    return (s, pe)
+            except (ValueError, TypeError):
+                pass
+        return (s, None)
+
+    result: dict[str, Optional[float]] = {}
+    # Parallel fetch — one thread per stock, timeout per stock
+    with ThreadPoolExecutor(max_workers=min(len(unique), 10)) as pool:
+        futures = {pool.submit(_fetch_one, s): s for s in unique}
+        for future in as_completed(futures):
+            try:
+                code, pe_val = future.result(timeout=12)
+                if pe_val is not None:
+                    result[code] = pe_val
             except Exception:
-                continue
-
-            item = data.get("data")
-            if not item or not isinstance(item, dict):
-                continue
-
-            pe_val = item.get("f115")
-            if pe_val is not None and pe_val != "-" and pe_val != "":
-                try:
-                    pe = float(pe_val)
-                    if pe > 0:  # filter out zero/negative PE
-                        result[s] = pe
-                except (ValueError, TypeError):
-                    pass
+                pass
 
     return result
