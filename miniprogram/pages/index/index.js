@@ -209,10 +209,9 @@ Page({
         loading: false,
         isFavorited: isFav,
       });
-      // fund_detail 已返回全部周期的指标，直接显示
+      // fund_detail 已返回全部指标含 PE，直接显示
       this._updateMetrics();
-      // 后台加载含 PE 的完整指标 + DCA
-      this._loadMetrics(code);
+      // 后台加载 DCA
       this._loadDca(code);
     } catch (e) {
       this.setData({ loading: false });
@@ -266,24 +265,6 @@ Page({
 
     // fund_detail 已返回全部周期指标，直接从缓存计算即可（零网络）
     this._updateMetrics();
-  },
-
-  // -----------------------------------------------------------------------
-  // 完整指标（含 PE）— 后台加载一次，不阻塞 UI
-  // -----------------------------------------------------------------------
-  async _loadMetrics(code) {
-    if (code !== this._currentCode) return; // 已切换到其他基金
-    try {
-      const data = await api.get("/api/funds/" + code + "/metrics?period=all");
-      if (code !== this._currentCode) return; // 请求返回时已切换
-      if (data.metrics) {
-        const metrics = { ...this.data.metrics, pe_ratio: data.metrics.pe_ratio };
-        this.setData({ metrics });
-        this._updateMetrics();
-      }
-    } catch (e) {
-      // 静默失败 — fund_detail 的指标已足够展示
-    }
   },
 
   // -----------------------------------------------------------------------

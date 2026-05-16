@@ -13,6 +13,7 @@ from database import init_db, get_db
 from models import Fund, Holding, FundNav
 from calculator.metrics import (
     compute_all_metrics,
+    dca_backtest,
     fund_pe_ratio,
     _period_cutoff_date,
 )
@@ -50,7 +51,6 @@ def _cached_dca(code, amount, years, db):
     if entry and entry["day"] == today_key:
         return entry["data"]
     # Compute fresh
-    from calculator.metrics import dca_backtest
     fund = db.query(Fund).filter(Fund.code == code).first()
     if not fund:
         return None
@@ -95,6 +95,13 @@ def _cached_fund_detail(code, db):
         "data_summary": {"nav_records": len(nav_list), "holding_count": len(holdings), "nav_start": nav_list[0]["nav_date"].isoformat() if nav_list else None, "nav_end": nav_list[-1]["nav_date"].isoformat() if nav_list else None},
     }
     _detail_cache[code] = {"day": today_key, "data": data}
+
+    # 顺便算默认DCA存入缓存，避免后续DCA请求重复查询NAV
+    if nav_list:
+        dca_default = dca_backtest(nav_list, 1000, 3)
+        if dca_default:
+            _dca_cache[f"{code}:1000:3"] = {"day": today_key, "data": dca_default}
+
     return data
 
 
