@@ -198,6 +198,7 @@ Page({
     this.setData({ loading: true, fund: null, dca: null });
     try {
       const data = await api.get("/api/funds/" + code);
+      if (code !== this._currentCode) return; // 防止竞态：请求返回时已切换基金
       const isFav = this.data.favorites.some(f => f.code === data.fund.code);
       this.setData({
         fund: data.fund,
@@ -240,14 +241,14 @@ Page({
     const fmtNum = (v, d = 2) => v != null ? v.toFixed(d) : "—";
 
     this.setData({
-      metricReturn: ret, metricReturnFmt: fmtPct(ret),
-      metricDrawdown: dd?.mdd, metricDrawdownFmt: fmtPct(dd?.mdd),
+      metricReturn: ret != null ? ret : null, metricReturnFmt: fmtPct(ret),
+      metricDrawdown: dd?.mdd != null ? dd.mdd : null, metricDrawdownFmt: fmtPct(dd?.mdd),
       mddPeak: dd?.peak_date || "", mddTrough: dd?.trough_date || "",
-      metricVol: vol, metricVolFmt: fmtPct(vol),
-      metricSharpe: sharpe, metricSharpeFmt: fmtNum(sharpe),
-      peRatio: pe, peRatioFmt: pe != null ? pe.toFixed(1) : "—",
-      metricCalmar: calmar, metricCalmarFmt: fmtNum(calmar),
-      metricWinRate: win, metricWinRateFmt: fmtPct(win),
+      metricVol: vol != null ? vol : null, metricVolFmt: fmtPct(vol),
+      metricSharpe: sharpe != null ? sharpe : null, metricSharpeFmt: fmtNum(sharpe),
+      peRatio: pe != null ? pe : null, peRatioFmt: pe != null ? pe.toFixed(1) : "—",
+      metricCalmar: calmar != null ? calmar : null, metricCalmarFmt: fmtNum(calmar),
+      metricWinRate: win != null ? win : null, metricWinRateFmt: fmtPct(win),
       metricRecoveryFmt: recovery
         ? (recovery.recovered ? recovery.recovery_days + "天" : "未修复")
         : "—",

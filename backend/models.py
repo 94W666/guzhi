@@ -43,6 +43,10 @@ class Holding(Base):
 
     fund = relationship("Fund", back_populates="holdings")
 
+    __table_args__ = (
+        Index("ix_holdings_fund_stock_date", "fund_id", "stock_code", "report_date"),
+    )
+
     def __repr__(self):
         return f"<Holding(fund_id={self.fund_id}, stock={self.stock_code}, weight={self.weight})>"
 

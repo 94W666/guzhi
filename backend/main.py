@@ -1,6 +1,5 @@
 """FastAPI application — Multi-Dimensional Fund Analysis Platform."""
 
-from datetime import date
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,20 +13,11 @@ from database import init_db, get_db
 from models import Fund, Holding, FundNav
 from calculator.metrics import (
     compute_all_metrics,
-    max_drawdown,
-    annualized_return,
-    volatility,
-    sharpe_ratio,
     fund_pe_ratio,
-    sortino_ratio,
-    calmar_ratio,
-    win_rate,
     _period_cutoff_date,
 )
 from scraper.fund_nav import ensure_nav_data
 from scraper.fund_holdings import fetch_holdings, save_holdings_to_db
-from calculator.metrics import dca_backtest
-from calculator.commentary import generate_commentary
 
 # Track funds where we already tried (and failed) to fetch holdings
 _holdings_fetch_attempted = set()

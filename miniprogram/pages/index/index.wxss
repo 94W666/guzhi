@@ -170,8 +170,9 @@
 }
 .vs-label { font-size: 22rpx; color: #888; display: block; margin-bottom: 4rpx; }
 .vs-value { font-size: 32rpx; font-weight: 700; display: block; }
-.vs-value.positive { color: #27ae60; }
 .vs-sub { font-size: 20rpx; color: #aaa; display: block; margin-top: 4rpx; }
+.dca-value.positive { color: #27ae60; }
+.dca-value.negative { color: #e74c3c; }
 .dca-stat.highlight-stat { background: #f0f7ff; border-left: 4rpx solid #4a90d9; }
 
 /* Holdings Table */

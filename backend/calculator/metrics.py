@@ -336,6 +336,12 @@ def win_rate(nav_list: list[dict], period: str = "1y") -> Optional[float]:
 
 def compute_all_metrics(nav_list: list[dict]) -> dict:
     """Compute a complete metrics summary for a fund's NAV history."""
+    s1 = sortino_ratio(nav_list, "1y")
+    s3 = sortino_ratio(nav_list, "3y")
+    c1 = calmar_ratio(nav_list, "1y")
+    c3 = calmar_ratio(nav_list, "3y")
+    w1 = win_rate(nav_list, "1y")
+    w3 = win_rate(nav_list, "3y")
     return {
         "returns": all_returns(nav_list),
         "max_drawdown": {
@@ -347,16 +353,16 @@ def compute_all_metrics(nav_list: list[dict]) -> dict:
         "volatility": all_volatilities(nav_list),
         "sharpe": all_sharpes(nav_list),
         "sortino": {
-            "1y": round(sortino_ratio(nav_list, "1y"), 4) if sortino_ratio(nav_list, "1y") is not None else None,
-            "3y": round(sortino_ratio(nav_list, "3y"), 4) if sortino_ratio(nav_list, "3y") is not None else None,
+            "1y": round(s1, 4) if s1 is not None else None,
+            "3y": round(s3, 4) if s3 is not None else None,
         },
         "calmar": {
-            "1y": round(calmar_ratio(nav_list, "1y"), 4) if calmar_ratio(nav_list, "1y") is not None else None,
-            "3y": round(calmar_ratio(nav_list, "3y"), 4) if calmar_ratio(nav_list, "3y") is not None else None,
+            "1y": round(c1, 4) if c1 is not None else None,
+            "3y": round(c3, 4) if c3 is not None else None,
         },
         "win_rate": {
-            "1y": round(win_rate(nav_list, "1y"), 4) if win_rate(nav_list, "1y") is not None else None,
-            "3y": round(win_rate(nav_list, "3y"), 4) if win_rate(nav_list, "3y") is not None else None,
+            "1y": round(w1, 4) if w1 is not None else None,
+            "3y": round(w3, 4) if w3 is not None else None,
         },
         "recovery_days": {
             "1y": max_drawdown_recovery(nav_list, "1y"),

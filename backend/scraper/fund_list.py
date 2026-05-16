@@ -8,6 +8,7 @@ import json
 import re
 import sys
 import os
+from datetime import date, timedelta
 from typing import Optional
 
 import httpx
@@ -55,8 +56,8 @@ def fetch_fund_list(fund_type: str = "qdii") -> list[dict]:
         "gs": "0",
         "sc": "zzf",
         "st": "desc",
-        "sd": "2024-01-01",
-        "ed": "2025-12-31",
+        "sd": (date.today() - timedelta(days=730)).isoformat(),
+        "ed": date.today().isoformat(),
         "qdii": "",
         "tabSubtype": ",,,,,",
         "pi": "1",

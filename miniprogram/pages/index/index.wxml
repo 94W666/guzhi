@@ -87,7 +87,7 @@
     <view class="cards">
       <view class="card" bindtap="showMetricInfo" data-key="annual_return">
         <text class="card-label">年化收益({{activePeriod}})</text>
-        <text class="card-value {{metricReturn >= 0 ? 'positive' : 'negative'}}">{{metricReturnFmt}}</text>
+        <text class="card-value {{metricReturn != null && metricReturn >= 0 ? 'positive' : 'negative'}}">{{metricReturnFmt}}</text>
       </view>
       <view class="card highlight" bindtap="showMetricInfo" data-key="max_drawdown">
         <text class="card-label">最大回撤({{activePeriod}})</text>
