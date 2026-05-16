@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "基金数据分析",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f0f2f5"
+  },
+  "networkTimeout": {
+    "request": 30000
+  },
+  "sitemapLocation": "sitemap.json"
+}

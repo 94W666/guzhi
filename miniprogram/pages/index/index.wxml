@@ -1,0 +1,230 @@
+<!-- pages/index/index.wxml — 基金数据分析主页 -->
+<view class="page">
+
+  <!-- Header -->
+  <view class="header">
+    <text class="title" bindtap="goHome">基金数据分析</text>
+    <view class="search-bar">
+      <view class="search-row">
+        <input class="search-input"
+          placeholder="输入基金代码搜索"
+          value="{{searchQuery}}"
+          bindinput="onSearchInput"
+          bindconfirm="onSearchConfirm"
+          confirm-type="search"
+        />
+        <view class="search-btn" bindtap="onSearchConfirm">搜索</view>
+      </view>
+      <!-- 搜索结果下拉 -->
+      <view class="search-dropdown" wx:if="{{searchResults.length}}">
+        <view class="search-item"
+          wx:for="{{searchResults}}"
+          wx:key="code"
+          data-code="{{item.code}}"
+          bindtap="selectFund"
+        >
+          <text class="fund-code">{{item.code}}</text>
+          <text class="fund-name">{{item.name}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- Loading -->
+  <view class="loading" wx:if="{{loading}}">
+    <view class="spinner"></view>
+    <text>加载中...</text>
+  </view>
+
+  <!-- Landing -->
+  <view class="landing" wx:if="{{!fund && !loading}}">
+    <text class="landing-title">基金数据分析工具</text>
+    <text class="landing-desc">输入基金代码或名称，查看年化收益、最大回撤、夏普比率、PE 估值、定投回测等多维度指标。</text>
+
+    <!-- 自选列表 -->
+    <view class="fav-list" wx:if="{{favorites.length}}">
+      <text class="fav-list-title">自选基金</text>
+      <view class="fav-item" wx:for="{{favorites}}" wx:key="code" data-code="{{item.code}}" bindtap="loadFavorite" bindlongpress="removeFavorite">
+        <view class="fav-item-left">
+          <text class="fav-item-code">{{item.code}}</text>
+          <text class="fav-item-name">{{item.name}}</text>
+        </view>
+        <text class="fav-item-type">{{item.fund_type}}</text>
+        <text class="fav-item-del" catchtap="removeFavorite" data-code="{{item.code}}" data-name="{{item.name}}">✕</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Fund Data -->
+  <block wx:if="{{fund}}">
+    <!-- Fund Info Bar -->
+    <view class="fund-bar">
+      <view class="fund-bar-left">
+        <text class="fund-bar-name">{{fund.name}}</text>
+        <text class="fund-bar-code">{{fund.code}}</text>
+        <text class="badge">{{fund.fund_type}}</text>
+        <text class="scale-badge" wx:if="{{scaleFmt}}">{{scaleFmt}}</text>
+        <text class="date-badge" wx:if="{{navStart}}">成立 {{navStart}}</text>
+      </view>
+      <view class="fav-btn {{isFavorited ? 'favorited' : ''}}" bindtap="toggleFavorite">
+        <text>{{isFavorited ? '★' : '☆'}}</text>
+      </view>
+    </view>
+
+    <!-- Period Tabs -->
+    <view class="period-tabs">
+      <view class="tab {{activePeriod === '1y' ? 'active' : ''}}"
+        data-period="1y" bindtap="switchPeriod">近1年</view>
+      <view class="tab {{activePeriod === '3y' ? 'active' : ''}}"
+        data-period="3y" bindtap="switchPeriod">近3年</view>
+      <view class="tab {{activePeriod === '5y' ? 'active' : ''}}"
+        data-period="5y" bindtap="switchPeriod">近5年</view>
+      <view class="tab {{activePeriod === 'all' ? 'active' : ''}}"
+        data-period="all" bindtap="switchPeriod">成立以来</view>
+    </view>
+
+    <!-- Metric Cards -->
+    <view class="cards">
+      <view class="card" bindtap="showMetricInfo" data-key="annual_return">
+        <text class="card-label">年化收益({{activePeriod}})</text>
+        <text class="card-value {{metricReturn >= 0 ? 'positive' : 'negative'}}">{{metricReturnFmt}}</text>
+      </view>
+      <view class="card highlight" bindtap="showMetricInfo" data-key="max_drawdown">
+        <text class="card-label">最大回撤({{activePeriod}})</text>
+        <text class="card-value negative">{{metricDrawdownFmt}}</text>
+        <text class="card-sub" wx:if="{{mddPeak}}">{{mddPeak}} → {{mddTrough}}</text>
+      </view>
+      <view class="card" bindtap="showMetricInfo" data-key="recovery_days">
+        <text class="card-label">回撤修复({{activePeriod}})</text>
+        <text class="card-value">{{metricRecoveryFmt}}</text>
+      </view>
+      <view class="card" bindtap="showMetricInfo" data-key="volatility">
+        <text class="card-label">波动率({{activePeriod}})</text>
+        <text class="card-value">{{metricVolFmt}}</text>
+      </view>
+      <view class="card" bindtap="showMetricInfo" data-key="sharpe">
+        <text class="card-label">夏普比率({{activePeriod}})</text>
+        <text class="card-value">{{metricSharpeFmt}}</text>
+      </view>
+      <view class="card" bindtap="showMetricInfo" data-key="pe_ratio" wx:if="{{peRatio !== null}}">
+        <text class="card-label">PE 比率</text>
+        <text class="card-value">{{peRatioFmt}}</text>
+      </view>
+      <view class="card" bindtap="showMetricInfo" data-key="calmar">
+        <text class="card-label">Calmar({{activePeriod}})</text>
+        <text class="card-value">{{metricCalmarFmt}}</text>
+      </view>
+      <view class="card" bindtap="showMetricInfo" data-key="win_rate">
+        <text class="card-label">胜率({{activePeriod}})</text>
+        <text class="card-value">{{metricWinRateFmt}}</text>
+      </view>
+    </view>
+
+    <!-- DCA 定投回测 -->
+    <view class="dca-section" wx:if="{{fund}}">
+      <text class="section-title">定投回测</text>
+
+      <!-- 参数输入 -->
+      <view class="dca-params">
+        <view class="dca-param">
+          <text class="param-label">每月金额</text>
+          <input class="param-input" type="digit" value="{{dcaAmount}}" bindinput="onDcaAmountInput" />
+          <text class="param-unit">元</text>
+        </view>
+        <view class="dca-param">
+          <text class="param-label">回测年数</text>
+          <input class="param-input" type="number" value="{{dcaYears}}" bindinput="onDcaYearsInput" />
+          <text class="param-unit">年</text>
+        </view>
+        <view class="dca-btn" bindtap="recalcDca">计算</view>
+      </view>
+
+      <!-- 解释说明 -->
+      <view class="dca-explain">
+        <text>假设从 <text class="bold">{{dca.start_date}}</text> 开始，每月首个交易日固定投入 <text class="bold">¥{{dca.monthly_amount}}</text>，持续 <text class="bold">{{dca.total_months}}个月</text>。共投入 <text class="bold">¥{{dca.total_invested_wan}}万</text>。</text>
+      </view>
+
+      <!-- 数据不足警告 -->
+      <view class="dca-warning" wx:if="{{dca.dataInsufficient}}">
+        <text>⚠ 该基金净值数据仅覆盖 {{dca.total_months}} 个月，不足你设定的 {{dca.requestedYears}} 年。以下结果仅基于已有数据回测，不代表完整 {{dca.requestedYears}} 年表现。</text>
+      </view>
+
+      <!-- 核心结果 -->
+      <view class="dca-summary">
+        <view class="dca-stat highlight-stat">
+          <text class="dca-label">持仓终值（至{{dca.end_date}}）</text>
+          <text class="dca-value">¥{{dca.final_value_wan}}万</text>
+        </view>
+        <view class="dca-stat">
+          <text class="dca-label">总收益率</text>
+          <text class="dca-value {{dca.total_return_pct >= 0 ? 'positive' : 'negative'}}">{{dca.total_return_pct > 0 ? '+' : ''}}{{dca.total_return_pct_fmt}}%</text>
+        </view>
+        <view class="dca-stat">
+          <text class="dca-label">年化收益率</text>
+          <text class="dca-value {{dca.annualized_return_pct >= 0 ? 'positive' : 'negative'}}">{{dca.annualized_return_pct > 0 ? '+' : ''}}{{dca.annualized_return_pct_fmt}}%</text>
+        </view>
+      </view>
+
+      <!-- 成本 vs 净值 -->
+      <view class="dca-cost-compare">
+        <text class="compare-label">成本与净值对比</text>
+        <view class="compare-row">
+          <text class="compare-item">平均成本 <text class="bold">{{dca.avg_cost}}</text></text>
+          <text class="compare-vs">vs</text>
+          <text class="compare-item">当前净值 <text class="bold">{{dca.current_nav}}</text></text>
+        </view>
+        <text class="compare-hint {{dca.cost_above_nav ? 'negative' : 'positive'}}">{{dca.cost_nav_desc}}</text>
+      </view>
+
+      <!-- 一次性对比 -->
+      <view class="dca-vs-lump">
+        <text class="compare-label">如果一次性买入呢？</text>
+        <text>若在 <text class="bold">{{dca.start_date}}</text> 将 ¥{{dca.total_invested_wan}}万 一次性全部买入，持有至今。</text>
+        <view class="vs-row">
+          <view class="vs-col">
+            <text class="vs-label">定投</text>
+            <text class="vs-value">{{dca.total_return_pct > 0 ? '+' : ''}}{{dca.total_return_pct_fmt}}%</text>
+            <text class="vs-sub">累计投入 ÷ 期末市值</text>
+          </view>
+          <view class="vs-col">
+            <text class="vs-label">一次性</text>
+            <text class="vs-value">{{dca.lump_return_fmt}}%</text>
+            <text class="vs-sub">首日全仓买入</text>
+          </view>
+        </view>
+        <text class="compare-hint">{{dca.vs_lump_desc}}</text>
+      </view>
+
+      <text class="disclaimer">历史模拟不代表未来收益 · 定投回测仅展示过去数据推算</text>
+    </view>
+
+    <!-- Holdings -->
+    <view class="section" wx:if="{{holdings.length}}">
+      <text class="section-title">前十大持仓</text>
+      <view class="holdings-table">
+        <view class="holdings-header">
+          <text class="h-col code-col">股票代码</text>
+          <text class="h-col name-col">股票名称</text>
+          <text class="h-col weight-col">权重</text>
+        </view>
+        <view class="holdings-row" wx:for="{{holdings}}" wx:key="stock_code">
+          <text class="code-col">{{item.stock_code}}</text>
+          <text class="name-col">{{item.stock_name}}</text>
+          <text class="weight-col">{{item.weight}}%</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- Disclaimer -->
+    <text class="footer-disclaimer">数据来源：东方财富 | 仅供参考，不构成投资建议</text>
+  </block>
+</view>
+
+<!-- Metric Info Modal -->
+<view class="modal-mask" wx:if="{{modalVisible}}" bindtap="closeModal">
+  <view class="modal-box" catchtap="">
+    <text class="modal-title">{{modalTitle}}</text>
+    <view class="modal-body">{{modalBody}}</view>
+    <view class="modal-close-btn" bindtap="closeModal">关闭</view>
+  </view>
+</view>

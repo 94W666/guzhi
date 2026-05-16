@@ -110,6 +110,83 @@ def max_drawdown(nav_list: list[dict], period: str = "all") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Max Drawdown Recovery Days
+# ---------------------------------------------------------------------------
+
+def max_drawdown_recovery(nav_list: list[dict], period: str = "all") -> Optional[dict]:
+    """Calculate how many days it took to recover from the maximum drawdown.
+
+    From the trough date of the max drawdown, find the first date when NAV
+    returns to the peak level. Returns None if the fund hasn't recovered yet.
+
+    Returns::
+
+        {
+            "recovery_days": int | None,   # days from trough to recovery, None if unrecovered
+            "recovered": bool,
+            "peak_date": str | None,
+            "trough_date": str | None,
+            "recovery_date": str | None,   # date NAV surpassed peak, None if unrecovered
+            "period": str,
+        }
+    """
+    mdd_result = max_drawdown(nav_list, period)
+    if not mdd_result.get("peak_date") or not mdd_result.get("trough_date"):
+        return {
+            "recovery_days": None, "recovered": False,
+            "peak_date": None, "trough_date": None, "recovery_date": None,
+            "period": period,
+        }
+
+    data = _slice_by_period(nav_list, period)
+    peak_value = None
+    trough_idx = None
+    trough_date_str = mdd_result["trough_date"]
+    peak_date_str = mdd_result["peak_date"]
+
+    # Find peak value and trough index
+    for i, row in enumerate(data):
+        d = row["nav_date"].isoformat() if hasattr(row["nav_date"], "isoformat") else row["nav_date"]
+        nav = row["cumulative_nav"] or row["unit_nav"]
+        if d == peak_date_str:
+            peak_value = nav
+        if d == trough_date_str:
+            trough_idx = i
+
+    if peak_value is None or trough_idx is None:
+        return {
+            "recovery_days": None, "recovered": False,
+            "peak_date": peak_date_str, "trough_date": trough_date_str, "recovery_date": None,
+            "period": period,
+        }
+
+    # Search forward from trough for first date >= peak
+    for row in data[trough_idx + 1:]:
+        nav = row["cumulative_nav"] or row["unit_nav"]
+        if nav >= peak_value:
+            recovery_date = row["nav_date"].isoformat() if hasattr(row["nav_date"], "isoformat") else str(row["nav_date"])
+            trough_d = data[trough_idx]["nav_date"]
+            trough_dt = trough_d if hasattr(trough_d, "isoformat") else __import__("datetime").date.fromisoformat(str(trough_d))
+            recovery_dt = row["nav_date"]
+            if hasattr(recovery_dt, "isoformat"):
+                recovery_dt = recovery_dt
+            days = (recovery_dt - trough_dt).days
+            return {
+                "recovery_days": days, "recovered": True,
+                "peak_date": peak_date_str, "trough_date": trough_date_str,
+                "recovery_date": recovery_date,
+                "period": period,
+            }
+
+    # Never recovered
+    return {
+        "recovery_days": None, "recovered": False,
+        "peak_date": peak_date_str, "trough_date": trough_date_str, "recovery_date": None,
+        "period": period,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Annualized Return
 # ---------------------------------------------------------------------------
 
@@ -280,6 +357,12 @@ def compute_all_metrics(nav_list: list[dict]) -> dict:
         "win_rate": {
             "1y": round(win_rate(nav_list, "1y"), 4) if win_rate(nav_list, "1y") is not None else None,
             "3y": round(win_rate(nav_list, "3y"), 4) if win_rate(nav_list, "3y") is not None else None,
+        },
+        "recovery_days": {
+            "1y": max_drawdown_recovery(nav_list, "1y"),
+            "3y": max_drawdown_recovery(nav_list, "3y"),
+            "5y": max_drawdown_recovery(nav_list, "5y"),
+            "since_inception": max_drawdown_recovery(nav_list, "all"),
         },
     }
 

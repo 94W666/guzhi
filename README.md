@@ -16,11 +16,11 @@
 
 ## 技术栈
 
-| 层 | 技术 |
-|---|---|
-| 后端 | Python 3 + FastAPI + SQLAlchemy + SQLite |
-| 前端 | Vanilla JS SPA + Chart.js 4.4 |
-| 数据源 | 东方财富公开 API |
+| 层 | Web 版 | 小程序版 |
+|---|---|---|
+| 后端 | Python 3 + FastAPI + SQLAlchemy + SQLite | 同左 (CloudBase 云托管 + MySQL) |
+| 前端 | Vanilla JS SPA + Chart.js 4.4 | WXML/WXSS/JS + ECharts ec-canvas |
+| 数据源 | 东方财富公开 API | 同左 |
 
 ## 快速开始
 
@@ -31,24 +31,38 @@ python backend/main.py
 
 浏览器打开 http://localhost:8000
 
+### 微信小程序版
+
+1. 用微信开发者工具打开 `miniprogram/` 目录
+2. 安装 ECharts：`cd miniprogram/utils && npm install echarts && cp node_modules/echarts/dist/echarts.min.js .`
+3. 在开发者工具中勾选"不校验合法域名"
+4. 启动后端 `python backend/main.py`，小程序即可调用本地 API
+5. 上线时部署到 CloudBase 云托管：`Dockerfile` 已就绪
+
 ## 项目结构
 
 ```
-backend/
-├── main.py               # FastAPI 应用 + 全部路由
-├── models.py             # ORM 模型（Fund, Holding, FundNav）
-├── database.py           # SQLite 连接与会话管理
-├── config.py             # 配置常量
-├── calculator/
-│   └── metrics.py        # 指标计算引擎 + PE + DCA
-├── scraper/
-│   ├── fund_list.py      # 基金列表爬虫
-│   ├── fund_nav.py       # 净值历史爬虫
-│   └── fund_holdings.py  # 持仓爬虫
-└── static/
-    ├── index.html
-    ├── app.js
-    └── style.css
+├── Dockerfile                 # CloudBase 云托管部署
+├── backend/                   # FastAPI 后端
+│   ├── main.py
+│   ├── models.py
+│   ├── database.py
+│   ├── config.py
+│   ├── calculator/
+│   │   └── metrics.py
+│   ├── scraper/
+│   │   ├── fund_list.py
+│   │   ├── fund_nav.py
+│   │   └── fund_holdings.py
+│   └── static/                # Web 前端
+│       ├── index.html
+│       ├── app.js
+│       └── style.css
+└── miniprogram/               # 微信小程序
+    ├── app.js / app.json
+    ├── pages/index/           # 主页面
+    ├── components/ec-canvas/  # ECharts 图表组件
+    └── utils/api.js           # API 封装
 ```
 
 ## API

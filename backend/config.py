@@ -2,9 +2,14 @@
 
 import os
 
-# Database
+# Database — 本地用 SQLite，云端通过环境变量切换 MySQL
+# 本地: 不设环境变量即可
+# 云托管: DATABASE_URL=mysql+pymysql://user:pass@host:3306/dbname
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'data.db')}"
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    f"sqlite:///{os.path.join(BASE_DIR, 'data.db')}",
+)
 
 # Eastmoney API base URLs
 FUND_LIST_URL = "https://fund.eastmoney.com/data/rankhandler.aspx"
