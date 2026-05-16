@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.db
+data.db
+miniprogram/
+CLAUDE.md
+README.md
+.git
+.gitignore
+.env
+.venv
+venv
+Dockerfile
+.dockerignore
