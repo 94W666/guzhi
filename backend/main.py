@@ -49,6 +49,31 @@ def _cached_fund_list():
     return data
 
 
+# DCA 结果缓存 — 同一基金+参数当天只算一次
+_dca_cache: dict = {}
+
+def _cached_dca(code, amount, years, db):
+    from datetime import date as _date
+    today_key = _date.today().isoformat()
+    cache_key = f"{code}:{amount}:{years}"
+    entry = _dca_cache.get(cache_key)
+    if entry and entry["day"] == today_key:
+        return entry["data"]
+    # Compute fresh
+    from calculator.metrics import dca_backtest
+    fund = db.query(Fund).filter(Fund.code == code).first()
+    if not fund:
+        return None
+    ensure_nav_data(code)
+    nav_records = db.query(FundNav).filter(FundNav.fund_id == fund.id).order_by(FundNav.nav_date.asc()).all()
+    nav_list = [{"nav_date": n.nav_date, "unit_nav": n.unit_nav, "cumulative_nav": n.cumulative_nav, "daily_return": n.daily_return} for n in nav_records]
+    if not nav_list:
+        return None
+    result = dca_backtest(nav_list, amount, years)
+    _dca_cache[cache_key] = {"day": today_key, "data": result}
+    return result
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -421,30 +446,12 @@ def fund_dca(
     years: int = Query(3, ge=1, le=10),
     db: Session = Depends(get_db),
 ):
-    """Simulate monthly dollar-cost averaging backtest."""
+    """Simulate monthly dollar-cost averaging backtest (cached per day)."""
     fund = db.query(Fund).filter(Fund.code == code).first()
     if not fund:
         raise HTTPException(status_code=404, detail=f"Fund '{code}' not found")
 
-    ensure_nav_data(code)
-
-    nav_records = (
-        db.query(FundNav)
-        .filter(FundNav.fund_id == fund.id)
-        .order_by(FundNav.nav_date.asc())
-        .all()
-    )
-
-    nav_list = [
-        {"nav_date": n.nav_date, "unit_nav": n.unit_nav,
-         "cumulative_nav": n.cumulative_nav, "daily_return": n.daily_return}
-        for n in nav_records
-    ]
-
-    if not nav_list:
-        raise HTTPException(status_code=404, detail="No NAV data available")
-
-    result = dca_backtest(nav_list, amount, years)
+    result = _cached_dca(code, amount, years, db)
     if not result:
         raise HTTPException(status_code=404, detail="Not enough NAV data for DCA backtest")
 
