@@ -64,6 +64,40 @@ def _cached_dca(code, amount, years, db):
     return result
 
 
+# 基金详情缓存 — 指标计算太耗时，当天只算一次
+_detail_cache: dict = {}
+
+def _cached_fund_detail(code, db):
+    from datetime import date as _date
+    today_key = _date.today().isoformat()
+    entry = _detail_cache.get(code)
+    if entry and entry["day"] == today_key:
+        return entry["data"]
+
+    fund = db.query(Fund).filter(Fund.code == code).first()
+    if not fund:
+        return None
+
+    ensure_nav_data(code)
+    holdings = db.query(Holding).filter(Holding.fund_id == fund.id).all()
+
+    nav_records = db.query(FundNav).filter(FundNav.fund_id == fund.id).order_by(FundNav.nav_date.asc()).all()
+    nav_list = [{"nav_date": n.nav_date, "unit_nav": n.unit_nav, "cumulative_nav": n.cumulative_nav, "daily_return": n.daily_return} for n in nav_records]
+
+    metrics = compute_all_metrics(nav_list) if nav_list else {}
+    pe_data = fund_pe_ratio(code)
+    metrics["pe_ratio"] = pe_data
+
+    data = {
+        "fund": {"id": fund.id, "code": fund.code, "name": fund.name, "fund_type": fund.fund_type, "tracking_index": fund.tracking_index or "", "scale": fund.scale or 0},
+        "metrics": metrics,
+        "holdings": [{"stock_code": h.stock_code, "stock_name": h.stock_name, "weight": h.weight, "report_date": h.report_date.isoformat()} for h in holdings],
+        "data_summary": {"nav_records": len(nav_list), "holding_count": len(holdings), "nav_start": nav_list[0]["nav_date"].isoformat() if nav_list else None, "nav_end": nav_list[-1]["nav_date"].isoformat() if nav_list else None},
+    }
+    _detail_cache[code] = {"day": today_key, "data": data}
+    return data
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -237,71 +271,10 @@ def fund_detail(code: str, db: Session = Depends(get_db)):
     if not fund:
         raise HTTPException(status_code=404, detail=f"Fund '{code}' not found")
 
-    # Ensure NAV data exists
-    nav_count = ensure_nav_data(code)
-
-    # Ensure holdings exist (only try once per fund per session)
-    holding_count = db.query(Holding).filter(Holding.fund_id == fund.id).count()
-    if holding_count == 0 and code not in _holdings_fetch_attempted:
-        _holdings_fetch_attempted.add(code)
-        try:
-            result = fetch_holdings(code)
-            if result:
-                holdings_data, report_date = result
-                save_holdings_to_db(fund.id, holdings_data, report_date)
-        except Exception:
-            pass  # holdings fetch is best-effort
-
-    # Load NAV history
-    nav_records = (
-        db.query(FundNav)
-        .filter(FundNav.fund_id == fund.id)
-        .order_by(FundNav.nav_date.asc())
-        .all()
-    )
-
-    nav_list = [
-        {
-            "nav_date": n.nav_date,
-            "unit_nav": n.unit_nav,
-            "cumulative_nav": n.cumulative_nav,
-            "daily_return": n.daily_return,
-        }
-        for n in nav_records
-    ]
-
-    # Compute metrics
-    metrics = compute_all_metrics(nav_list) if nav_list else {}
-
-    # Load current holdings
-    holdings = db.query(Holding).filter(Holding.fund_id == fund.id).all()
-
-    return {
-        "fund": {
-            "id": fund.id,
-            "code": fund.code,
-            "name": fund.name,
-            "fund_type": fund.fund_type,
-            "tracking_index": fund.tracking_index,
-            "scale": fund.scale,
-        },
-        "metrics": metrics,
-        "holdings": [
-            {
-                "stock_code": h.stock_code,
-                "stock_name": h.stock_name,
-                "weight": h.weight,
-                "report_date": h.report_date.isoformat(),
-            }
-            for h in holdings
-        ],
-        "data_summary": {
-            "nav_records": nav_count,
-            "holding_count": len(holdings),
-            "nav_start": nav_list[0]["nav_date"].isoformat() if nav_list else None,
-            "nav_end": nav_list[-1]["nav_date"].isoformat() if nav_list else None,
-        },
-    }
+    # 优先从缓存取（当天只算一次）
+    cached = _cached_fund_detail(code, db)
+    if cached:
+        return cached
 
 
 # ---------------------------------------------------------------------------
