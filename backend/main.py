@@ -32,6 +32,22 @@ from calculator.commentary import generate_commentary
 # Track funds where we already tried (and failed) to fetch holdings
 _holdings_fetch_attempted = set()
 
+# Fund list cache — 避免每次搜索都请求东方财富
+_fund_list_cache: dict = {"data": None, "ts": 0}
+_FUND_LIST_CACHE_TTL = 3600  # 1小时
+
+def _cached_fund_list():
+    import time
+    now = time.time()
+    if _fund_list_cache["data"] is not None and (now - _fund_list_cache["ts"]) < _FUND_LIST_CACHE_TTL:
+        return _fund_list_cache["data"]
+    from scraper.fund_list import fetch_fund_list as _fetch
+    data = _fetch("all")
+    if data:
+        _fund_list_cache["data"] = data
+        _fund_list_cache["ts"] = now
+    return data
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -135,7 +151,7 @@ def search_fund(q: str = Query(..., min_length=1), db: Session = Depends(get_db)
                 matches.append(f)
         return matches
 
-    all_funds = fetch_fund_list("all")
+    all_funds = _cached_fund_list()
     if all_funds:
         matches = _find_all_in_list(all_funds, q)
         for m in matches:
@@ -185,7 +201,7 @@ def fund_detail(code: str, db: Session = Depends(get_db)):
         from scraper.fund_list import fetch_fund_list, save_to_db as save_fund_list
 
         matched = None
-        all_funds = fetch_fund_list("all")
+        all_funds = _cached_fund_list()
         if all_funds:
             for f in all_funds:
                 if f.get("code") == code:
