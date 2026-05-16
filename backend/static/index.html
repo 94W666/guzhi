@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基金分析平台</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>基金多维度分析</h1>
+            <div class="search-bar">
+                <input type="text" id="searchInput"
+                    placeholder="输入基金代码或名称搜索..." autocomplete="off" />
+                <div class="search-dropdown" id="searchDropdown"></div>
+            </div>
+            <div class="period-tabs" id="periodTabs"></div>
+        </header>
+
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p id="loadingText">正在加载数据...</p>
+        </div>
+
+        <!-- Dashboard -->
+        <main id="mainContent"></main>
+
+        <!-- Metric Info Modal -->
+        <div class="modal-overlay" id="metricModal" onclick="if(event.target===this)closeModal()">
+            <div class="modal-content">
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+                <h3 id="modalTitle"></h3>
+                <div class="modal-body" id="modalBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Disclaimer Footer -->
+    <footer class="disclaimer-bar">
+        数据来源：东方财富 | 内容仅供参考，不构成投资建议 | 过往业绩不预示未来表现
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
