@@ -10,7 +10,7 @@ App({
     // 2. 环境变量配置 DATABASE_URL=mysql+pymysql://user:pass@host/db
     // 3. 改下方配置：
     useCloud: false,
-    apiBase: "http://localhost:8000",
+    apiBase: "https://fund-backend-258622-9-1433815187.sh.run.tcloudbase.com",
 
     // 云托管配置（useCloud: true 时生效）
     cloudEnv: "",        // 云开发环境 ID，如 "prod-xxx"
