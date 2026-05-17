@@ -1,15 +1,26 @@
 """FastAPI application — Multi-Dimensional Fund Analysis Platform."""
 
+import logging
+import os
+import sys
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-import os
+from sqlalchemy import text
 
-from contextlib import asynccontextmanager
+# Setup logging early — cloud hosting logs go to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger("fund-analyzer")
 
-from database import init_db, get_db
+from database import init_db, get_db, engine
 from models import Fund, Holding, FundNav
 from calculator.metrics import (
     compute_all_metrics,
@@ -107,8 +118,18 @@ def _cached_fund_detail(code, db):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    logger.info("=== Fund Analyzer starting up ===")
+    logger.info("Python version: %s", sys.version)
+    logger.info("Database URL type: %s", "MySQL" if "mysql" in str(engine.url) else "SQLite")
+    try:
+        init_db()
+        logger.info("Database initialization complete.")
+    except Exception as e:
+        logger.error("Database init failed: %s", e, exc_info=True)
+        raise
+    logger.info("=== Fund Analyzer ready ===")
     yield
+    logger.info("=== Fund Analyzer shutting down ===")
 
 
 app = FastAPI(
@@ -147,7 +168,17 @@ def serve_dashboard():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "Fund Analyzer"}
+    db_ok = True
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "service": "Fund Analyzer",
+        "database": "connected" if db_ok else "disconnected",
+    }
 
 
 # ---------------------------------------------------------------------------
