@@ -40,7 +40,6 @@ _fund_list_cache: dict = {"data": None, "ts": 0}
 _FUND_LIST_CACHE_TTL = 3600  # 1小时
 
 def _cached_fund_list():
-    import time
     now = time.time()
     if _fund_list_cache["data"] is not None and (now - _fund_list_cache["ts"]) < _FUND_LIST_CACHE_TTL:
         return _fund_list_cache["data"]
@@ -252,7 +251,7 @@ def search_fund(q: str = Query(..., min_length=1), db: Session = Depends(get_db)
         })
 
     # 2. Search Eastmoney (search all fund types directly)
-    from scraper.fund_list import fetch_fund_list, save_to_db as save_fund_list
+    from scraper.fund_list import save_to_db as save_fund_list
 
     def _find_all_in_list(funds, query):
         """Find all funds matching by code or name."""
@@ -311,7 +310,7 @@ def fund_detail(code: str, db: Session = Depends(get_db)):
     fund = db.query(Fund).filter(Fund.code == code).first()
     if not fund:
         # Auto-discover from Eastmoney
-        from scraper.fund_list import fetch_fund_list, save_to_db as save_fund_list
+        from scraper.fund_list import save_to_db as save_fund_list
 
         matched = None
         all_funds = _cached_fund_list()
