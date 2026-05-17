@@ -163,23 +163,24 @@ Page({
   async onSearchConfirm(e) {
     const q = (e.detail && e.detail.value || this.data.searchQuery).trim();
     if (!q) return;
-    // 先搜索，有结果就直接展示下拉供选择
+    wx.showLoading({ title: "搜索中..." });
     try {
       const data = await api.get("/api/funds/search?q=" + encodeURIComponent(q));
+      wx.hideLoading();
       const results = data.results || [];
       if (results.length === 1) {
-        // 唯一匹配直接加载
         this.selectFund({ currentTarget: { dataset: { code: results[0].code } } });
       } else if (results.length > 0) {
-        // 多个结果，展示下拉列表
         this.setData({ searchResults: results });
       } else {
-        // 无结果
         this.setData({ searchResults: [] });
         wx.showToast({ title: "未找到匹配的基金", icon: "none" });
       }
     } catch (e) {
-      wx.showToast({ title: "搜索失败", icon: "none" });
+      wx.hideLoading();
+      console.error("搜索失败:", e);
+      // 云托管首次冷请求可能超时，提示用户重试
+      wx.showToast({ title: "网络超时，请重试一次", icon: "none", duration: 2500 });
     }
   },
 

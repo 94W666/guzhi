@@ -127,6 +127,31 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Database init failed: %s", e, exc_info=True)
         raise
+
+    # Pre-load full fund list into DB so every user search is a fast
+    # local query (no Eastmoney API call needed).  Runs in background
+    # thread so health-check is ready immediately.
+    try:
+        import threading
+
+        def _warm():
+            logger.info("Pre-loading fund list into database (background)...")
+            from scraper.fund_list import fetch_fund_list, save_to_db as save_fund_list
+            data = fetch_fund_list("all")
+            if data:
+                inserted, updated = save_fund_list(data)
+                logger.info("Fund list persisted: %d funds (new=%d, updated=%d)",
+                            len(data), inserted, updated)
+                # Also warm the in-memory cache for search_fund fallback
+                _fund_list_cache["data"] = data
+                _fund_list_cache["ts"] = time.time()
+            else:
+                logger.warning("Fund list fetch returned empty — "
+                               "searches for unknown funds will fall back to API")
+        threading.Thread(target=_warm, daemon=True).start()
+    except Exception:
+        logger.warning("Fund list pre-load failed", exc_info=True)
+
     logger.info("=== Fund Analyzer ready ===")
     yield
     logger.info("=== Fund Analyzer shutting down ===")

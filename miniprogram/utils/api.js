@@ -17,7 +17,7 @@ function _wxRequest(path) {
     wx.request({
       url: app.globalData.apiBase + path,
       method: "GET",
-      timeout: 30000,
+      timeout: 60000,
       success(res) {
         if (res.statusCode === 200) {
           resolve(res.data);
@@ -32,20 +32,27 @@ function _wxRequest(path) {
 
 function _callContainer(path) {
   return new Promise((resolve, reject) => {
+    console.log("[api] callContainer →", path);
     wx.cloud.callContainer({
-      config: { env: app.globalData.cloudEnv },
+      config: {
+        env: app.globalData.cloudEnv,
+      },
       path: path,
       method: "GET",
       header: { "X-WX-SERVICE": app.globalData.cloudService },
-      timeout: 30000,
+      timeout: 60000,
       success(res) {
+        console.log("[api] callContainer ←", res.statusCode);
         if (res.statusCode === 200) {
           resolve(res.data);
         } else {
           reject(new Error("HTTP " + res.statusCode));
         }
       },
-      fail(err) { reject(err); }
+      fail(err) {
+        console.error("[api] callContainer fail:", JSON.stringify(err));
+        reject(err);
+      }
     });
   });
 }

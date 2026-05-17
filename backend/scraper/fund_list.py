@@ -163,21 +163,33 @@ def _guess_tracking_index(name: str) -> str:
     return "US Market"
 
 
-def save_to_db(funds: list[dict]):
-    """Save fund list to SQLite database. Upserts by fund code."""
+def save_to_db(funds: list[dict], batch_size: int = 500):
+    """Save fund list to database. Upserts by fund code.
+
+    Commits in batches of *batch_size* to avoid huge transactions.
+    Returns (inserted, updated) counts.
+    """
+    import logging
+    logger = logging.getLogger("fund-analyzer")
+
     from database import SessionLocal, init_db
     from models import Fund
 
     init_db()
     db = SessionLocal()
 
+    inserted = 0
+    updated = 0
+    total = len(funds)
+
     try:
-        for f in funds:
+        for i, f in enumerate(funds):
             existing = db.query(Fund).filter(Fund.code == f["code"]).first()
             if existing:
                 existing.name = f["name"]
                 existing.scale = f.get("scale", 0.0)
                 existing.tracking_index = f.get("tracking_index", "")
+                updated += 1
             else:
                 fund = Fund(
                     code=f["code"],
@@ -187,11 +199,19 @@ def save_to_db(funds: list[dict]):
                     scale=f.get("scale", 0.0),
                 )
                 db.add(fund)
+                inserted += 1
+
+            if (i + 1) % batch_size == 0:
+                db.commit()
+                logger.info("Fund list persist: %d/%d (new=%d, updated=%d)",
+                            i + 1, total, inserted, updated)
+
         db.commit()
-        print(f"Saved {len(funds)} funds to database")
-    except Exception as e:
+        logger.info("Fund list persist complete: %d funds (new=%d, updated=%d)",
+                     total, inserted, updated)
+    except Exception:
         db.rollback()
-        print(f"Database error: {e}")
         raise
     finally:
         db.close()
+    return inserted, updated
